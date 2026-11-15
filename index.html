@@ -2739,6 +2739,20 @@ body.hideGameplayHud #labHud {
   -webkit-user-select:none;
   overscroll-behavior:none;
 }
+/* iPad Safari: override every nested sprite/span and pseudo-element too.
+   The browser must treat held controls as game input, never selectable content. */
+#touch, #touch *, #touch *::before, #touch *::after {
+  -webkit-touch-callout:none !important;
+  -webkit-user-select:none !important;
+  user-select:none !important;
+  -webkit-user-drag:none !important;
+  touch-action:none !important;
+  -webkit-tap-highlight-color:transparent !important;
+}
+#touch .retroIcon, #touch .dpadCenter,
+#touch .dpadWrap::before, #touch .dpadWrap::after {
+  pointer-events:none !important;
+}
 /* Touch buttons are hidden on ALL menu / setup / pause / game-over screens.
    Only JS may enable them during actual single-player touchscreen gameplay. */
 #game:not(.touch-gameplay-active) #touch,
@@ -34102,7 +34116,23 @@ window.addEventListener("keydown", function(event) {
   pause.type='button';
   pause.textContent='PAUSE';
   touch.appendChild(pause);
-  pause.addEventListener('click',()=>{if(typeof runPaused!=='undefined'&&runPaused)closeRunPause();else openRunPause();});
+  const toggleTouchPause = () => {
+    if (typeof runPaused !== 'undefined' && runPaused) closeRunPause();
+    else openRunPause();
+  };
+  let lastPauseTouchAt = -Infinity;
+  pause.addEventListener('touchend', e => {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    // Prevent touchstart's canceled default from swallowing the Pause action.
+    lastPauseTouchAt = performance.now();
+    toggleTouchPause();
+  }, {capture:true, passive:false});
+  pause.addEventListener('click', e => {
+    // Avoid doubling a touchend that a browser also converts into a click.
+    if (performance.now() - lastPauseTouchAt < 650) return;
+    toggleTouchPause();
+  });
 
   const holdBindings = [
     ['#touchLeft', () => setKey('left', true), () => setKey('left', false)],
@@ -34125,6 +34155,7 @@ window.addEventListener("keydown", function(event) {
       if (e.cancelable) e.preventDefault();
       e.stopImmediatePropagation();
       setInput('touch');
+      if (activePointer !== null) return; // Pointer + touch events from one finger count once.
       activePointer = 'pointerId' in e ? e.pointerId : 'touch';
       try { if ('pointerId' in e && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch(_) {}
       onPress();
@@ -34141,38 +34172,66 @@ window.addEventListener("keydown", function(event) {
     for (const evt of ['pointerup','pointercancel','lostpointercapture']) {
       el.addEventListener(evt, release, true);
     }
-    if (!window.PointerEvent) { // Fallback for older touch-only browsers.
-      el.addEventListener('touchstart', press, {passive:false,capture:true});
-      for (const evt of ['touchend','touchcancel']) {
-        el.addEventListener(evt, release, {passive:false,capture:true});
-      }
+    // Always bind touch as well: Safari can cancel PointerEvents on a held finger.
+    // The activePointer guard prevents duplicate press/release actions.
+    el.addEventListener('touchstart', press, {passive:false,capture:true});
+    for (const evt of ['touchend','touchcancel']) {
+      el.addEventListener(evt, release, {passive:false,capture:true});
     }
   }
 
   for (const [selector, onPress, onRelease] of holdBindings) bindHold(selector, onPress, onRelease);
+  // Safari/WebKit may show a native "Look Up"/Inspect callout even with CSS
+  // user-select:none. Cancel the native long-press gesture at touchstart.
+  // These are gameplay controls only; normal scrolling in menus is untouched.
+  const stopNativeTouchGesture = e => { if (e.cancelable) e.preventDefault(); };
+  for (const evt of ['touchstart','touchmove']) {
+    touch.addEventListener(evt, stopNativeTouchGesture, {capture:true,passive:false});
+  }
+  for (const evt of ['contextmenu','selectstart','dragstart','gesturestart']) {
+    touch.addEventListener(evt, e => {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+
 
   const touchReload = touch.querySelector('#touchReload');
   if (touchReload) {
+    let reloadDown = false;
     const reloadNow = e => {
       if (e.cancelable) e.preventDefault();
       e.stopImmediatePropagation();
+      if (reloadDown) return;
+      reloadDown = true;
       setInput('touch');
       if (typeof beginSurvivalReload === 'function') beginSurvivalReload();
     };
+    const reloadUp = () => { reloadDown = false; };
     touchReload.addEventListener('pointerdown', reloadNow, true);
-    if (!window.PointerEvent) touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
+    touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
+    for (const evt of ['pointerup','pointercancel','lostpointercapture','touchend','touchcancel']) {
+      touchReload.addEventListener(evt, reloadUp, true);
+    }
   }
 
   const touchDash = touch.querySelector('#touchDash');
   if (touchDash) {
+    let dashDown = false;
     const dashNow = e => {
       if (e.cancelable) e.preventDefault();
       e.stopImmediatePropagation();
+      if (dashDown) return;
+      dashDown = true;
       setInput('touch');
       if (typeof dashRequested !== 'undefined') dashRequested = true;
     };
+    const dashUp = () => { dashDown = false; };
     touchDash.addEventListener('pointerdown', dashNow, true);
-    if (!window.PointerEvent) touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
+    touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
+    for (const evt of ['pointerup','pointercancel','lostpointercapture','touchend','touchcancel']) {
+      touchDash.addEventListener(evt, dashUp, true);
+    }
   }
 
   window.addEventListener('blur', releaseTouchInputs);
