@@ -2582,12 +2582,12 @@ body.hideGameplayHud #labHud {
 @media(max-width:650px){.modifierChoices{grid-template-columns:1fr}}
 
 /* Mobile joystick + controller-friendly touch interface */
-#touch { align-items:flex-end; touch-action:none; }
+#touch { align-items:flex-end; touch-action:none; z-index:50; }
 #touch .touchGroup:first-child { display:none; }
 #mobileStick { width:112px;height:112px;border-radius:50%;border:3px solid #5ef2d6;background:rgba(9,17,34,.78);position:relative;pointer-events:auto;touch-action:none;flex-shrink:0; }
 #mobileStickKnob { width:49px;height:49px;border-radius:50%;background:#5ef2d6;box-shadow:0 0 14px #5ef2d6;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none; }
 #touch .touchGroup:last-child { gap:9px;align-items:flex-end; }
-#touch .touchBtn { width:62px;height:62px;border-radius:50%;touch-action:none; }
+#touch .touchBtn { width:62px;height:62px;border-radius:50%;touch-action:none;pointer-events:auto; }
 #touchFire { background:#ff5a98;box-shadow:3px 3px 0 #8b2148; }
 #touchPause { position:absolute;right:10px;top:-75px;width:64px;height:38px;border-radius:9px;font-size:11px;pointer-events:auto; }
 @media (pointer:coarse) { #touch { display:flex; } }
@@ -2601,6 +2601,20 @@ body.hideGameplayHud #labHud {
 /* Enable native swipe scrolling inside every long menu on phones and tablets. */
 .settingsBox,.shopBox,.questBox,.playerStatsBox,.bestScoresBox{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;}
 #mobileStick,#touch button{touch-action:none;}
+
+/* iOS/iPadOS: holding a game control must not open the text-selection/callout menu. */
+#game button, #game .touchBtn, #game #mobileStick, #game #mobileStick *,
+#game [role="button"] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#game button, #game .touchBtn, #game #mobileStick, #game [role="button"] {
+  touch-action: manipulation;
+}
+#game #mobileStick, #game #mobileStick *, #game .touchBtn { touch-action: none; }
+/* Do not disable scrolling or text editing in menus. */
 </style>
 <style id="labSandboxStyle">
 /* Training is not a scored Survival run. Only useful weapon controls remain. */
@@ -33903,7 +33917,7 @@ window.addEventListener("keydown", function(event) {
   touch.insertBefore(stick,touch.firstElementChild);
   const pause=document.createElement('button'); pause.id='touchPause'; pause.type='button';pause.textContent='PAUSE';
   touch.appendChild(pause);
-  pause.addEventListener('click',()=>window.dispatchEvent(new KeyboardEvent('keydown',{code:'Escape',key:'Escape',bubbles:true})));
+  pause.addEventListener('click',()=>{if(typeof runPaused!=='undefined'&&runPaused)closeRunPause();else openRunPause();});
   const knob=stick.firstElementChild;
   let stickPointer=null, horizontal=0, vertical=0;
   const virtualHeld=new Set();
@@ -33920,15 +33934,35 @@ window.addEventListener("keydown", function(event) {
     knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
     const h=dx>limit*.35?1:dx< -limit*.35?-1:0;
     const v=dy< -limit*.58?-1:0;
-    if(h!==horizontal){emit('ArrowLeft',h===-1);emit('ArrowRight',h===1);horizontal=h;}
-    if(v!==vertical){emit('ArrowUp',v===-1);vertical=v;}
+    if(h!==horizontal){setKey('left',h===-1);setKey('right',h===1);horizontal=h;}
+    if(v!==vertical){setKey('jump',v===-1);vertical=v;}
   }
   stick.addEventListener('pointerdown',e=>{e.preventDefault();stickPointer=e.pointerId;stick.setPointerCapture(e.pointerId);stickMove(e);});
   stick.addEventListener('pointermove',e=>{if(e.pointerId===stickPointer)stickMove(e);});
-  function stickStop(e){if(e.pointerId!==stickPointer)return;stickPointer=null;knob.style.transform='translate(-50%,-50%)';horizontal=vertical=0;['ArrowLeft','ArrowRight','ArrowUp'].forEach(k=>emit(k,false));}
+  function stickStop(e){if(e.pointerId!==stickPointer)return;stickPointer=null;knob.style.transform='translate(-50%,-50%)';horizontal=vertical=0;setKey('left',false);setKey('right',false);setKey('jump',false);}
   stick.addEventListener('pointerup',stickStop);stick.addEventListener('pointercancel',stickStop);
   // Existing FIRE, RELOAD and JUMP touch buttons keep their original handlers.
   // A Gamepad API adapter uses the same native keyboard event paths as the game.
+  // Native touch controls: update the actual game input state directly.
+  // iOS Safari does not always dispatch synthesized KeyboardEvents to gameplay.
+  const nativeButtons = [...touch.querySelectorAll('.touchBtn[data-key]')];
+  for (const button of nativeButtons) {
+    const action=button.dataset.key;
+    const press=e=>{e.preventDefault();e.stopImmediatePropagation();setInput('touch');setKey(action,true);};
+    const release=e=>{if(e.cancelable)e.preventDefault();e.stopImmediatePropagation();setKey(action,false);};
+    button.addEventListener('pointerdown',press,true);
+    for(const event of ['pointerup','pointercancel','lostpointercapture']) button.addEventListener(event,release,true);
+    // Safari fallback where pointer events are unavailable or interrupted.
+    button.addEventListener('touchstart',press,{passive:false,capture:true});
+    for(const event of ['touchend','touchcancel']) button.addEventListener(event,release,{passive:false,capture:true});
+  }
+  // Use pointer capture so holding a direction or action does not release it
+  // when a finger slides outside the visible button.
+  for(const button of nativeButtons){button.addEventListener('pointerdown',e=>{try{button.setPointerCapture(e.pointerId);}catch(_){};});}
+  // Joystick is a separate native control; prevent browser gestures and ensure
+  // the gameplay keys are released if the browser cancels a gesture.
+  stick.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
+  window.addEventListener('blur',()=>{setKey('left',false);setKey('right',false);setKey('jump',false);});
   const padHeld=new Set();let lastNav=0,wasMenu=false;
   const btn=(p,i)=>!!p.buttons[i]?.pressed;
   function frame(t){
@@ -34054,6 +34088,26 @@ window.addEventListener("keydown", function(event) {
     e.preventDefault(); // Suppress delayed, duplicate compatibility click on iOS.
     button.click();      // Invoke the game's original click handler directly.
   }, {passive:false,capture:true});
+})();
+</script>
+
+<script>
+/* Prevent the iOS long-press inspection/context menu on game controls only. */
+(function(){
+  document.addEventListener('contextmenu', function(event){
+    var target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('#game button, #game .touchBtn, #game #mobileStick, #game [role="button"]')) {
+      event.preventDefault();
+    }
+  }, {capture:true});
+  document.addEventListener('selectstart', function(event){
+    var target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('#game button, #game .touchBtn, #game #mobileStick, #game [role="button"]')) {
+      event.preventDefault();
+    }
+  }, {capture:true});
 })();
 </script>
 </body>
