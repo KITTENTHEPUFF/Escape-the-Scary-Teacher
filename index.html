@@ -3552,6 +3552,22 @@ button, [role="button"], label.modifierChoice, #menu a, #gameSetup a {
 #gameScriptRequiredNotice p { font-size:clamp(14px,2vw,17px); }
 html[data-game-js-ready="true"] #gameScriptRequiredNotice { display:none !important; }
 </style>
+<style id="controller-mac-compat-style">
+/* Dedicated controller detection/calibration, including nonstandard Mac gamepads. */
+#controllerTestOpen { margin-top:14px;background:#a9f2ce;box-shadow:6px 6px 0 #397b65; }
+#controllerTestPanel { z-index:90; }
+.controllerTestBox { width:min(710px,94%); max-height:88vh; overflow-y:auto; padding:24px; border:3px solid #a9f2ce; background:#0d152b; box-shadow:8px 8px 0 #31634f; text-align:center; overscroll-behavior:contain; }
+.controllerTestBox h2 { color:#a9f2ce; margin:0 0 12px; }
+.controllerTestBox p { font-size:13px; line-height:1.55; color:#c7d2ec; }
+#controllerConnectionText { margin:10px 0; color:#ffe285; font-weight:bold; }
+#controllerRawInput { margin:12px 0; background:#050b17; padding:12px; border:1px solid #415775; color:#89f8cc; font:12px/1.6 monospace; white-space:pre-wrap; overflow-wrap:anywhere; text-align:left; }
+#controllerBindStatus { color:#ffde75; font:900 13px/1.5 monospace; min-height:22px; margin:12px 0; }
+.controllerBindGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin:12px 0 16px; }
+.controllerBindGrid button { padding:10px 5px; box-shadow:3px 3px 0 #1f6c57; font:800 11px/1.3 monospace; background:#8ceac9; color:#09212b; }
+.controllerTestFooter { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; }
+.controllerTestFooter button { padding:12px 16px; font-size:12px; }
+@media(max-width:530px){.controllerBindGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.controllerTestBox{padding:15px}}
+</style>
 </head>
 
 <body>
@@ -3650,6 +3666,33 @@ html[data-game-js-ready="true"] #gameScriptRequiredNotice { display:none !import
 
 </div>
 
+<div id="controllerTestPanel" class="screen hidden" role="dialog" aria-modal="true" aria-label="Controller test and setup">
+  <div class="controllerTestBox">
+    <h2>CONTROLLER TEST & SETUP</h2>
+    <p>Keep this browser tab selected, then press any button on your controller. This page will show the inputs your Mac browser actually receives.</p>
+    <div id="controllerConnectionText">Checking Gamepad API…</div>
+    <div id="controllerRawInput">Waiting for controller input.</div>
+    <div id="controllerBindStatus">If a controller is found but its buttons do the wrong thing, remap them below.</div>
+    <div class="controllerBindGrid">
+      <button type="button" data-pad-bind="confirm">SELECT · A</button>
+      <button type="button" data-pad-bind="jump">JUMP</button>
+      <button type="button" data-pad-bind="fire">FIRE</button>
+      <button type="button" data-pad-bind="reload">RELOAD</button>
+      <button type="button" data-pad-bind="dash">DASH</button>
+      <button type="button" data-pad-bind="pause">PAUSE</button>
+      <button type="button" data-pad-bind="back">BACK</button>
+      <button type="button" data-pad-bind="left">D-PAD LEFT</button>
+      <button type="button" data-pad-bind="right">D-PAD RIGHT</button>
+      <button type="button" data-pad-bind="up">D-PAD UP</button>
+      <button type="button" data-pad-bind="down">D-PAD DOWN</button>
+      <button type="button" data-pad-bind="axisX">SET LEFT STICK</button>
+    </div>
+    <div class="controllerTestFooter">
+      <button type="button" id="controllerResetMappings">RESET CONTROLLER MAPPING</button>
+      <button type="button" id="controllerClose">BACK TO MENU</button>
+    </div>
+  </div>
+</div>
 <div id="menu" class="screen">
 
   <div class="menu">
@@ -3675,6 +3718,8 @@ html[data-game-js-ready="true"] #gameScriptRequiredNotice { display:none !import
     <button id="openWeaponLab" type="button" onclick="expansionOpenLab()">
       WEAPON TESTING LAB
     </button>
+
+    <button id="controllerTestOpen" type="button">CONTROLLER TEST / SETUP</button>
 
     <button id="openSettings" type="button">
       SETTINGS
@@ -34250,11 +34295,74 @@ window.addEventListener("keydown", function(event) {
   let navigationRepeatAt=0;
   let navigationDirection='';
   let detectedPadId='';
+  let lastPadError='';
+  let eventPad=null;
+  let preferredPadIndex=null;
+  let pendingPadBind=null;
+  let previousPhysicalButtons=new Set();
+  const padMappingsKey='teacherGameControllerMappingsV2';
+  let padMappings={};
+  try { const saved=JSON.parse(localStorage.getItem(padMappingsKey)||'{}');
+    if(saved && typeof saved==='object' && !Array.isArray(saved))padMappings=saved;
+  } catch(_) {}
+  const currentPadMapping = p => (padMappings[String(p.id||'default')] || {});
+  const storePadMapping = (p,key,value) => {
+    const id=String(p.id||'default');
+    padMappings[id]={...currentPadMapping(p),[key]:value};
+    try{localStorage.setItem(padMappingsKey,JSON.stringify(padMappings));}catch(_){}
+    updateBindingLabels(p);
+  };
+  const controllerPanel=document.getElementById('controllerTestPanel');
+  const controllerConnectionText=document.getElementById('controllerConnectionText');
+  const controllerRawInput=document.getElementById('controllerRawInput');
+  const controllerBindStatus=document.getElementById('controllerBindStatus');
+  const controllerOpen=document.getElementById('controllerTestOpen');
+  const controllerClose=document.getElementById('controllerClose');
+  const bindingLabels={confirm:'SELECT',jump:'JUMP',fire:'FIRE',reload:'RELOAD',dash:'DASH',pause:'PAUSE',back:'BACK',left:'D-PAD LEFT',right:'D-PAD RIGHT',up:'D-PAD UP',down:'D-PAD DOWN',axisX:'LEFT STICK'};
+  const defaultPadButtons={confirm:0,jump:0,fire:7,reload:4,dash:5,pause:9,back:1,left:14,right:15,up:12,down:13};
+  function updateBindingLabels(p){
+    const map=p?currentPadMapping(p):{};
+    for(const btn of controllerPanel.querySelectorAll('[data-pad-bind]')){
+      const action=btn.dataset.padBind, index=map[action];
+      btn.textContent=bindingLabels[action]+(index===undefined?'':action==='axisX'?' · AXIS '+index:' · #'+index);
+    }
+  }
+  if(controllerOpen)controllerOpen.addEventListener('click',()=>{
+    controllerPanel.classList.remove('hidden');
+    pendingPadBind=null;
+    controllerBindStatus.textContent='Press a controller button. Detected inputs appear above; use remap buttons if needed.';
+    updateBindingLabels(getConnectedGamepad());
+    window.__gameMenuNavigation?.refresh?.();
+  });
+  if(controllerClose)controllerClose.addEventListener('click',()=>{
+    controllerPanel.classList.add('hidden');
+    pendingPadBind=null;
+    window.__gameMenuNavigation?.refresh?.();
+  });
+  controllerPanel.querySelectorAll('[data-pad-bind]').forEach(el=>el.addEventListener('click',()=>{
+    const p=getConnectedGamepad();
+    if(!p){ controllerBindStatus.textContent='Browser has not detected a controller. Keep this tab active and press a controller button.'; return; }
+    pendingPadBind=el.dataset.padBind;
+    // Ignore buttons already held while the remapping button is clicked.
+    const bs=Array.from(p.buttons||[]);
+    previousPhysicalButtons=new Set(bs.flatMap((b,i)=>buttonDown(bs,i)?[i]:[]));
+    controllerBindStatus.textContent=pendingPadBind==='axisX'?'MOVE YOUR LEFT STICK ALL THE WAY LEFT…':'PRESS THE CONTROLLER BUTTON FOR '+bindingLabels[pendingPadBind]+'…';
+  }));
+  document.getElementById('controllerResetMappings')?.addEventListener('click',()=>{
+    const p=getConnectedGamepad();
+    if(!p){controllerBindStatus.textContent='No controller detected yet.';return;}
+    delete padMappings[String(p.id||'default')];
+    try{localStorage.setItem(padMappingsKey,JSON.stringify(padMappings));}catch(_){}
+    pendingPadBind=null;
+    updateBindingLabels(p);
+    controllerBindStatus.textContent='Controller mapping restored to defaults.';
+  });
   const gamepadStatus=document.createElement('div');
   gamepadStatus.id='gamepadStatus';
-  gamepadStatus.style.cssText='display:none;margin-top:10px;color:#78efb6;font:bold 12px/1.6 monospace;';
+  gamepadStatus.style.cssText='display:block;margin-top:10px;color:#78efb6;font:bold 12px/1.6 monospace;';
   const controlsNote=document.querySelector('#menu .controls');
   if(controlsNote)controlsNote.appendChild(gamepadStatus);
+  setPadStatus('press a controller button, or open CONTROLLER TEST');
   function setPadStatus(message){
     if(!controlsNote)return;
     const txt=message?'CONTROLLER: '+message:'';
@@ -34269,16 +34377,36 @@ window.addEventListener("keydown", function(event) {
     for(const key of Object.keys(gamepadHeld))gamepadHeld[key]=false;
   }
   function getConnectedGamepad(){
-    if(typeof navigator.getGamepads!=='function')return null;
+    const getter=navigator.getGamepads||navigator.webkitGetGamepads;
+    if(typeof getter!=='function'){
+      lastPadError='This browser does not expose the Gamepad API.';
+      return eventPad&&eventPad.connected!==false?eventPad:null;
+    }
     try {
-      // Array.from also works for older Safari's non-Array GamepadList.
-      const available=Array.from(navigator.getGamepads()||[]);
-      return available.find(p=>p&&p.connected!==false)||null;
-    }catch(err){return null;}
+      const available=Array.from(getter.call(navigator)||[]).filter(p=>p&&p.connected!==false);
+      lastPadError='';
+      if(!available.length)return eventPad&&eventPad.connected!==false?eventPad:null;
+      // A Mac may have an idle virtual controller at slot 0. Pick the one
+      // receiving live input, otherwise remember the last actively used pad.
+      const active=available.find(p=>{
+        const b=Array.from(p.buttons||[]),a=Array.from(p.axes||[]);
+        return b.some(x=>x&&(x.pressed||Number(x.value||0)>.4))||a.some(x=>Math.abs(Number(x)||0)>.42);
+      });
+      if(active){preferredPadIndex=active.index;return active;}
+      return available.find(p=>p.index===preferredPadIndex)||available[0];
+    }catch(err){
+      lastPadError=(err&&err.name==='SecurityError')?'Browser permissions blocked Gamepad API. Open your game directly in Safari or Chrome.':String(err);
+      return eventPad&&eventPad.connected!==false?eventPad:null;
+    }
   }
   function buttonDown(buttons,index){
     const b=buttons[index];
     return !!b&&(b.pressed===true||Number(b.value||0)>.48||b===1);
+  }
+  function mappedButton(p,buttons,name,extras=[]){
+    const map=currentPadMapping(p);
+    if(Number.isInteger(map[name]))return buttonDown(buttons,map[name]);
+    return [defaultPadButtons[name],...extras].some(i=>buttonDown(buttons,i));
   }
   function syntheticEscape(){
     window.dispatchEvent(new KeyboardEvent('keydown',{
@@ -34323,27 +34451,41 @@ window.addEventListener("keydown", function(event) {
     gamepadHeld.jump=jump;
     gamepadHeld.fire=fire;
   }
-  window.addEventListener('gamepadconnected',()=>{
+  window.addEventListener('gamepadconnected',e=>{
+    eventPad=e.gamepad||null;
+    preferredPadIndex=eventPad?.index ?? preferredPadIndex;
     const pad=getConnectedGamepad();
-    if(pad)setPadStatus('connected · press A / Cross to select');
+    if(pad){setPadStatus('connected · controller detected');updateBindingLabels(pad);}
   });
-  window.addEventListener('gamepaddisconnected',()=>{
+  window.addEventListener('gamepaddisconnected',e=>{
+    if(eventPad?.index===e.gamepad?.index)eventPad=null;
+    if(preferredPadIndex===e.gamepad?.index)preferredPadIndex=null;
     releaseGamepadInputs();
     previousPadActions.clear();
     navigationDirection='';
     detectedPadId='';
     if(activeInput==='gamepad')setInput(coarse?'touch':'keyboard');
-    setPadStatus('');
+    setPadStatus('disconnected · reconnect controller');
   });
   function gamepadFrame(now){
     const p=getConnectedGamepad();
     if(!p){
-      if(detectedPadId){detectedPadId='';setPadStatus('');}
+      if(detectedPadId){detectedPadId='';setPadStatus('not detected · open CONTROLLER TEST');}
       if(activeInput==='gamepad')setInput(coarse?'touch':'keyboard');
       releaseGamepadInputs();
       previousPadActions.clear();
+      previousPhysicalButtons.clear();
       navigationDirection='';
+      if(controllerPanel && !controllerPanel.classList.contains('hidden')){
+        const msg=lastPadError||'No gamepad exposed to this webpage. Click once inside this browser tab, then press a controller button. On Mac, use Safari or Chrome and check that the controller is connected in macOS Bluetooth settings.';
+        if(controllerConnectionText.textContent!==msg)controllerConnectionText.textContent=msg;
+        if(controllerRawInput.textContent!=='No controller input available.')controllerRawInput.textContent='No controller input available.';
+      }
       return;
+    }
+    if(controllerPanel && !controllerPanel.classList.contains('hidden')){
+      const state='CONNECTED: '+String(p.id||'Controller')+' · slot '+p.index;
+      if(controllerConnectionText.textContent!==state)controllerConnectionText.textContent=state;
     }
     if(detectedPadId!==String(p.id||'controller')){
       detectedPadId=String(p.id||'controller');
@@ -34351,21 +34493,57 @@ window.addEventListener("keydown", function(event) {
     }
     const buttons=Array.from(p.buttons||[]);
     const axes=Array.from(p.axes||[]);
-    const x=Number(axes[0]||0),y=Number(axes[1]||0);
-    const left=x<-.30||buttonDown(buttons,14);
-    const right=x>.30||buttonDown(buttons,15);
-    const up=y<-.33||buttonDown(buttons,12);
-    const down=y>.33||buttonDown(buttons,13);
-    const confirm=buttonDown(buttons,0);
-    const back=buttonDown(buttons,1);
-    const fire=buttonDown(buttons,2)||buttonDown(buttons,7);
-    const reload=back||buttonDown(buttons,4);
-    const dash=buttonDown(buttons,3)||buttonDown(buttons,5);
-    const start=buttonDown(buttons,9);
+    const mapping=currentPadMapping(p);
+    const axisIndex=Number.isInteger(mapping.axisX)?mapping.axisX:0;
+    const axisSign=mapping.axisXSign===-1?-1:1;
+    const x=Number(axes[axisIndex]||0)*axisSign;
+    const y=Number(axes[Number.isInteger(mapping.axisY)?mapping.axisY:1]||0);
+    const left=x<-.30||mappedButton(p,buttons,'left');
+    const right=x>.30||mappedButton(p,buttons,'right');
+    const up=y<-.33||mappedButton(p,buttons,'up');
+    const down=y>.33||mappedButton(p,buttons,'down');
+    const confirm=mappedButton(p,buttons,'confirm');
+    const jump=mappedButton(p,buttons,'jump');
+    const back=mappedButton(p,buttons,'back');
+    const fire=mappedButton(p,buttons,'fire',[2]);
+    const reload=mappedButton(p,buttons,'reload',[1]);
+    const dash=mappedButton(p,buttons,'dash',[3]);
+    const start=mappedButton(p,buttons,'pause');
     const hasActivity=left||right||up||down||buttons.some(b=>b&&
       (b.pressed===true||Number(b.value||0)>.48))||axes.some(v=>Math.abs(Number(v)||0)>.42);
+    const downNow=new Set(buttons.flatMap((b,i)=>buttonDown(buttons,i)?[i]:[]));
+    const newlyDown=[...downNow].filter(i=>!previousPhysicalButtons.has(i));
+    previousPhysicalButtons=downNow;
+    if(controllerPanel && !controllerPanel.classList.contains('hidden')){
+      const pressed=[...downNow].join(', ') || 'none';
+      const ax=axes.map((v,i)=>i+':'+Number(v||0).toFixed(2)).join(' · ');
+      const raw='Device: '+String(p.id||'Controller')+'\nMapping: '+String(p.mapping||'non-standard')+
+        '\nButtons pressed: '+pressed+'\nAxes: '+(ax||'none');
+      if(controllerRawInput.textContent!==raw)controllerRawInput.textContent=raw;
+      if(pendingPadBind){
+        if(pendingPadBind==='axisX'){
+          const hit=axes.findIndex(v=>Math.abs(Number(v)||0)>.58);
+          if(hit!==-1){
+            storePadMapping(p,'axisX',hit);
+            storePadMapping(p,'axisXSign',Number(axes[hit])>0?-1:1);
+            controllerBindStatus.textContent='Left stick axis saved (#'+hit+').';
+            pendingPadBind=null;
+          }
+        }else if(newlyDown.length){
+          storePadMapping(p,pendingPadBind,newlyDown[0]);
+          controllerBindStatus.textContent=bindingLabels[pendingPadBind]+' mapped to button #'+newlyDown[0]+'.';
+          pendingPadBind=null;
+        }
+      }
+    }
     if(hasActivity && activeInput!=='gamepad')setInput('gamepad');
-    if(activeInput!=='gamepad')return;
+    if(activeInput!=='gamepad' && !pendingPadBind)return;
+    if(pendingPadBind || (controllerPanel && !controllerPanel.classList.contains('hidden'))) {
+      // While testing/mapping, don't accidentally launch a game or close the test.
+      previousPadActions=new Set();
+      releaseGamepadInputs();
+      return;
+    }
 
     // Controller usage is deliberately single-player only.
     if(typeof running!=='undefined'&&running&&typeof multiplayerActive==='function'&&multiplayerActive()){
@@ -34377,7 +34555,21 @@ window.addEventListener("keydown", function(event) {
     const choosingWeapon=typeof pendingWeaponChestChoice!=='undefined'&&!!pendingWeaponChestChoice;
     const tutorialOpen=typeof tutorial!=='undefined'&&!!tutorial.active;
     const settingsOpen=!!document.querySelector('#settingsPanel.show');
-    const modalOpen=!!document.querySelector('.screen:not(.hidden),#runPauseMenu.show,#settingsPanel.show,[aria-modal="true"].show');
+    // Only visible overlays should block gameplay. The previous broad
+    // '.screen:not(.hidden)' selector included unrelated UI screens and could
+    // silently classify a live run as menu navigation forever.
+    const blocksGameplay = el => {
+      if (!el || el.classList.contains('hidden')) return false;
+      const style=getComputedStyle(el);
+      return style.display!=='none' && style.visibility!=='hidden' &&
+        el.getClientRects().length>0;
+    };
+    const blockingOverlays = [
+      'menu','gameSetup','gameOver','controllerTestPanel',
+      'runPauseMenu','settingsPanel','shopPanel','questPanel',
+      'bestScoresPanel','playerStatsPanel'
+    ];
+    const modalOpen=blockingOverlays.some(id=>blocksGameplay(document.getElementById(id)));
     const gameplay=typeof running!=='undefined'&&running&&
       !pauseOpen&&!choosingWeapon&&!tutorialOpen&&!settingsOpen&&!modalOpen;
     const actions=new Set();
@@ -34396,7 +34588,7 @@ window.addEventListener("keydown", function(event) {
       const movement=new Set();
       if(left)movement.add('left');
       if(right)movement.add('right');
-      if(up||confirm)movement.add('jump');
+      if(up||jump)movement.add('jump');
       if(fire)movement.add('fire');
       if(reload)movement.add('reload');
       if(dash)movement.add('dash');
@@ -34423,6 +34615,7 @@ window.addEventListener("keydown", function(event) {
     }
     requestAnimationFrame(frame);
   }
+  window.__controllerDebug={getPad:getConnectedGamepad,getInput:()=>activeInput,getMapping:p=>p?currentPadMapping(p):null};
   requestAnimationFrame(frame);
 })();
 </script>
