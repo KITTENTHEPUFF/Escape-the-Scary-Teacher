@@ -2581,23 +2581,126 @@ body.hideGameplayHud #labHud {
 .modifierChoice small{font-size:11px;opacity:.76;line-height:1.35}
 @media(max-width:650px){.modifierChoices{grid-template-columns:1fr}}
 
-/* Mobile joystick + controller-friendly touch interface */
-#touch { align-items:flex-end; touch-action:none; z-index:50; }
-#touch .touchGroup:first-child { display:none; }
-#mobileStick { width:112px;height:112px;border-radius:50%;border:3px solid #5ef2d6;background:rgba(9,17,34,.78);position:relative;pointer-events:auto;touch-action:none;flex-shrink:0; }
-#mobileStickKnob { width:49px;height:49px;border-radius:50%;background:#5ef2d6;box-shadow:0 0 14px #5ef2d6;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none; }
-#touch .touchGroup:last-child { gap:9px;align-items:flex-end; }
-#touch .touchBtn { width:62px;height:62px;border-radius:50%;touch-action:none;pointer-events:auto; }
-#touchFire { background:#ff5a98;box-shadow:3px 3px 0 #8b2148; }
-#touchPause { position:absolute;right:10px;top:-75px;width:64px;height:38px;border-radius:9px;font-size:11px;pointer-events:auto; }
+/* Mobile d-pad + action buttons */
+#touch {
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:18px;
+  touch-action:none;
+  z-index:50;
+}
+#touch .touchGroup { align-items:flex-end; }
+#touch .touchMoveGroup { flex:0 0 auto; }
+.dpadWrap {
+  position:relative;
+  width:210px;
+  height:154px;
+  border:3px solid #5ef2d6;
+  border-radius:24px;
+  background:rgba(9,17,34,.82);
+  box-shadow:0 0 18px rgba(94,242,214,.2);
+  pointer-events:auto;
+}
+.dpadWrap::before,
+.dpadWrap::after {
+  content:"";
+  position:absolute;
+  background:rgba(94,242,214,.14);
+  border-radius:12px;
+}
+.dpadWrap::before { left:50%; top:18px; bottom:18px; width:24px; transform:translateX(-50%); }
+.dpadWrap::after { top:50%; left:18px; right:18px; height:24px; transform:translateY(-50%); }
+.dpadCenter {
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:34px;
+  height:34px;
+  transform:translate(-50%,-50%);
+  border-radius:10px;
+  background:#5ef2d6;
+  box-shadow:0 0 12px rgba(94,242,214,.65);
+  pointer-events:none;
+}
+.dpadBtn {
+  position:absolute;
+  top:50%;
+  transform:translateY(-50%);
+  width:88px !important;
+  height:88px !important;
+  border-radius:18px !important;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:28px;
+  background:#54d7be;
+  color:#071222;
+  box-shadow:4px 4px 0 #177d73;
+  opacity:.96;
+}
+.dpadLeft { left:14px; }
+.dpadRight { right:14px; }
+.touchActionGroup {
+  display:grid;
+  grid-template-columns:repeat(2, minmax(86px, 1fr));
+  gap:12px;
+  align-items:end;
+  justify-items:end;
+}
+.actionBtn {
+  width:94px !important;
+  height:94px !important;
+  border-radius:50% !important;
+  padding:0 8px;
+  font-size:15px;
+  line-height:1.1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  opacity:.96;
+  pointer-events:auto;
+}
+.jumpBtn { background:#67b9ff; box-shadow:4px 4px 0 #245c96; }
+.dashBtn { background:#7cf0a6; box-shadow:4px 4px 0 #248258; }
+.fireBtn { background:#ff5a98; box-shadow:4px 4px 0 #8b2148; }
+.reloadBtn { background:#f3c74a; box-shadow:4px 4px 0 #9f7020; color:#1a1321; }
+#touchPause {
+  position:absolute;
+  right:10px;
+  top:-84px;
+  width:92px;
+  height:52px;
+  border-radius:12px;
+  font-size:14px;
+  pointer-events:auto;
+}
 @media (pointer:coarse) { #touch { display:flex; } }
 
 /* Active input layout overrides viewport-size heuristics. */
 #game[data-active-input="touch"] #touch { display:flex !important; }
 #game[data-active-input="keyboard"] #touch,
 #game[data-active-input="gamepad"] #touch { display:none !important; }
-#game[data-active-input="touch"] #touch { max-width:calc(100% - 22px); left:11px;right:11px;bottom:12px; }
-@media(max-width:450px){#game[data-active-input="touch"] #mobileStick{width:88px;height:88px}#game[data-active-input="touch"] #touch .touchBtn{width:50px;height:50px;font-size:10px} }
+#game[data-active-input="touch"] #touch {
+  max-width:calc(100% - 22px);
+  left:11px;
+  right:11px;
+  bottom:12px;
+}
+@media(max-width:860px){
+  .dpadWrap{width:184px;height:138px}
+  .dpadBtn{width:78px !important;height:78px !important}
+  .actionBtn{width:84px !important;height:84px !important;font-size:13px}
+}
+@media(max-width:540px){
+  #game[data-active-input="touch"] #touch{gap:10px;left:8px;right:8px;bottom:8px}
+  .dpadWrap{width:152px;height:118px}
+  .dpadBtn{width:64px !important;height:64px !important;border-radius:14px !important}
+  .touchActionGroup{gap:8px}
+  .actionBtn{width:70px !important;height:70px !important;font-size:11px}
+  #touchPause{width:78px;height:44px;top:-68px;font-size:12px}
+}
 /* Enable native swipe scrolling inside every long menu on phones and tablets. */
 .settingsBox,.shopBox,.questBox,.playerStatsBox,.bestScoresBox{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;}
 #mobileStick,#touch button{touch-action:none;}
@@ -3467,15 +3570,19 @@ html[data-game-js-ready="true"] #gameScriptRequiredNotice { display:none !import
 
 <div id="touch">
 
-  <div class="touchGroup">
-    <button class="touchBtn" data-key="left"><span class="retroIcon retroIcon-left" role="img" aria-label="Left"></span></button>
-    <button class="touchBtn" data-key="right"><span class="retroIcon retroIcon-right" role="img" aria-label="Right"></span></button>
+  <div class="touchGroup touchMoveGroup">
+    <div class="dpadWrap" aria-label="Movement controls">
+      <button id="touchLeft" class="touchBtn dpadBtn dpadLeft" data-key="left" type="button"><span class="retroIcon retroIcon-left" role="img" aria-label="Left"></span></button>
+      <div class="dpadCenter" aria-hidden="true"></div>
+      <button id="touchRight" class="touchBtn dpadBtn dpadRight" data-key="right" type="button"><span class="retroIcon retroIcon-right" role="img" aria-label="Right"></span></button>
+    </div>
   </div>
 
-  <div class="touchGroup">
-    <button id="touchReload" class="touchBtn survivalTouchFire" type="button">RELOAD</button>
-    <button id="touchFire" class="touchBtn survivalTouchFire" type="button">FIRE</button>
-    <button class="touchBtn" data-key="jump">▲</button>
+  <div class="touchGroup touchActionGroup">
+    <button id="touchJump" class="touchBtn actionBtn jumpBtn" data-key="jump" type="button">JUMP</button>
+    <button id="touchDash" class="touchBtn actionBtn dashBtn" type="button">DASH</button>
+    <button id="touchFire" class="touchBtn actionBtn fireBtn survivalTouchFire" type="button">FIRE</button>
+    <button id="touchReload" class="touchBtn actionBtn reloadBtn survivalTouchFire" type="button">RELOAD</button>
   </div>
 
 </div>
@@ -33885,92 +33992,117 @@ window.addEventListener("keydown", function(event) {
   const gameRoot = document.getElementById('game');
   const coarse = window.matchMedia?.('(pointer:coarse)').matches || navigator.maxTouchPoints > 0;
   let activeInput = coarse ? 'touch' : 'keyboard';
-  let lastPhysicalInput = performance.now();
   let lastPadActivity = false;
+  const releaseTouchInputs = () => {
+    setKey('left', false);
+    setKey('right', false);
+    setKey('jump', false);
+    if (typeof releaseHeatwaveShot === 'function') releaseHeatwaveShot();
+    if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = false;
+  };
   function setInput(type) {
     if (activeInput === type) return;
     activeInput = type;
     gameRoot.dataset.activeInput = type;
-    // Release virtual joystick when switching to a physical controller or keyboard.
-    if (type !== 'touch') {
-      for (const code of virtualHeld) emit(code,false);
-      stickPointer=null;horizontal=vertical=0;
-      knob.style.transform='translate(-50%,-50%)';
-    }
+    if (type !== 'touch') releaseTouchInputs();
   }
   gameRoot.dataset.activeInput = activeInput;
+
   window.addEventListener('keydown', e => {
-    if (!e.isTrusted || e.repeat) return; // Synthetic gamepad/touch events must not change mode.
-    lastPhysicalInput=performance.now();setInput('keyboard');
+    if (!e.isTrusted || e.repeat) return;
+    setInput('keyboard');
   }, true);
   document.addEventListener('pointerdown', e => {
     if (!e.isTrusted) return;
-    lastPhysicalInput=performance.now();
     setInput(e.pointerType === 'touch' ? 'touch' : 'keyboard');
   }, true);
-  document.addEventListener('touchstart', () => {
-    lastPhysicalInput=performance.now();setInput('touch');
-  }, {capture:true,passive:true});
-  const stick = document.createElement('div');
-  stick.id='mobileStick'; stick.setAttribute('aria-label','Movement joystick');
-  stick.innerHTML='<div id="mobileStickKnob"></div>';
-  touch.insertBefore(stick,touch.firstElementChild);
-  const pause=document.createElement('button'); pause.id='touchPause'; pause.type='button';pause.textContent='PAUSE';
+  document.addEventListener('touchstart', () => setInput('touch'), {capture:true,passive:true});
+
+  const pause=document.createElement('button');
+  pause.id='touchPause';
+  pause.type='button';
+  pause.textContent='PAUSE';
   touch.appendChild(pause);
   pause.addEventListener('click',()=>{if(typeof runPaused!=='undefined'&&runPaused)closeRunPause();else openRunPause();});
-  const knob=stick.firstElementChild;
-  let stickPointer=null, horizontal=0, vertical=0;
-  const virtualHeld=new Set();
-  function emit(code,down) {
-    if(down===virtualHeld.has(code)) return;
-    if(down) virtualHeld.add(code); else virtualHeld.delete(code);
-    window.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code,key:code,bubbles:true}));
+
+  const holdBindings = [
+    ['#touchLeft', () => setKey('left', true), () => setKey('left', false)],
+    ['#touchRight', () => setKey('right', true), () => setKey('right', false)],
+    ['#touchJump', () => setKey('jump', true), () => setKey('jump', false)],
+    ['#touchFire', () => {
+      if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = true;
+      if (typeof fireSurvivalBlaster === 'function') fireSurvivalBlaster();
+    }, () => {
+      if (typeof releaseHeatwaveShot === 'function') releaseHeatwaveShot();
+      if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = false;
+    }]
+  ];
+
+  function bindHold(selector, onPress, onRelease) {
+    const el = touch.querySelector(selector);
+    if (!el) return;
+    let activePointer = null;
+    const press = e => {
+      if (e.cancelable) e.preventDefault();
+      e.stopImmediatePropagation();
+      setInput('touch');
+      activePointer = 'pointerId' in e ? e.pointerId : 'touch';
+      try { if ('pointerId' in e && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch(_) {}
+      onPress();
+    };
+    const release = e => {
+      if (activePointer === null) return;
+      if ('pointerId' in e && e.pointerId !== activePointer) return;
+      if (e.cancelable) e.preventDefault();
+      e.stopImmediatePropagation();
+      activePointer = null;
+      onRelease();
+    };
+    el.addEventListener('pointerdown', press, true);
+    for (const evt of ['pointerup','pointercancel','lostpointercapture','pointerleave']) {
+      el.addEventListener(evt, release, true);
+    }
+    el.addEventListener('touchstart', press, {passive:false,capture:true});
+    for (const evt of ['touchend','touchcancel']) {
+      el.addEventListener(evt, release, {passive:false,capture:true});
+    }
   }
-  function stickMove(e) {
-    const r=stick.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2;
-    let dx=e.clientX-cx,dy=e.clientY-cy;
-    const limit=r.width*.32,mag=Math.hypot(dx,dy);
-    if(mag>limit){dx=dx/mag*limit;dy=dy/mag*limit;}
-    knob.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
-    const h=dx>limit*.35?1:dx< -limit*.35?-1:0;
-    const v=dy< -limit*.58?-1:0;
-    if(h!==horizontal){setKey('left',h===-1);setKey('right',h===1);horizontal=h;}
-    if(v!==vertical){setKey('jump',v===-1);vertical=v;}
+
+  for (const [selector, onPress, onRelease] of holdBindings) bindHold(selector, onPress, onRelease);
+
+  const touchReload = touch.querySelector('#touchReload');
+  if (touchReload) {
+    const reloadNow = e => {
+      if (e.cancelable) e.preventDefault();
+      e.stopImmediatePropagation();
+      setInput('touch');
+      if (typeof beginSurvivalReload === 'function') beginSurvivalReload();
+    };
+    touchReload.addEventListener('pointerdown', reloadNow, true);
+    touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
   }
-  stick.addEventListener('pointerdown',e=>{e.preventDefault();stickPointer=e.pointerId;stick.setPointerCapture(e.pointerId);stickMove(e);});
-  stick.addEventListener('pointermove',e=>{if(e.pointerId===stickPointer)stickMove(e);});
-  function stickStop(e){if(e.pointerId!==stickPointer)return;stickPointer=null;knob.style.transform='translate(-50%,-50%)';horizontal=vertical=0;setKey('left',false);setKey('right',false);setKey('jump',false);}
-  stick.addEventListener('pointerup',stickStop);stick.addEventListener('pointercancel',stickStop);
-  // Existing FIRE, RELOAD and JUMP touch buttons keep their original handlers.
-  // A Gamepad API adapter uses the same native keyboard event paths as the game.
-  // Native touch controls: update the actual game input state directly.
-  // iOS Safari does not always dispatch synthesized KeyboardEvents to gameplay.
-  const nativeButtons = [...touch.querySelectorAll('.touchBtn[data-key]')];
-  for (const button of nativeButtons) {
-    const action=button.dataset.key;
-    const press=e=>{e.preventDefault();e.stopImmediatePropagation();setInput('touch');setKey(action,true);};
-    const release=e=>{if(e.cancelable)e.preventDefault();e.stopImmediatePropagation();setKey(action,false);};
-    button.addEventListener('pointerdown',press,true);
-    for(const event of ['pointerup','pointercancel','lostpointercapture']) button.addEventListener(event,release,true);
-    // Safari fallback where pointer events are unavailable or interrupted.
-    button.addEventListener('touchstart',press,{passive:false,capture:true});
-    for(const event of ['touchend','touchcancel']) button.addEventListener(event,release,{passive:false,capture:true});
+
+  const touchDash = touch.querySelector('#touchDash');
+  if (touchDash) {
+    const dashNow = e => {
+      if (e.cancelable) e.preventDefault();
+      e.stopImmediatePropagation();
+      setInput('touch');
+      if (typeof dashRequested !== 'undefined') dashRequested = true;
+    };
+    touchDash.addEventListener('pointerdown', dashNow, true);
+    touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
   }
-  // Use pointer capture so holding a direction or action does not release it
-  // when a finger slides outside the visible button.
-  for(const button of nativeButtons){button.addEventListener('pointerdown',e=>{try{button.setPointerCapture(e.pointerId);}catch(_){};});}
-  // Joystick is a separate native control; prevent browser gestures and ensure
-  // the gameplay keys are released if the browser cancels a gesture.
-  stick.addEventListener('touchstart',e=>{if(e.cancelable)e.preventDefault();},{passive:false});
-  window.addEventListener('blur',()=>{setKey('left',false);setKey('right',false);setKey('jump',false);});
-  const padHeld=new Set();let lastNav=0,wasMenu=false;
+
+  window.addEventListener('blur', releaseTouchInputs);
+
+  const padHeld=new Set();
+  let lastNav=0;
   const btn=(p,i)=>!!p.buttons[i]?.pressed;
   function frame(t){
     const p=navigator.getGamepads?.().find(Boolean);
     if(p){
-      // Switch only on actual gamepad activity, not simply because one is plugged in.
-      const padActivity = p.buttons.some(b=>b.pressed || b.value>.35) ||
-        p.axes.some(a=>Math.abs(a)>.36);
+      const padActivity = p.buttons.some(b=>b.pressed || b.value>.35) || p.axes.some(a=>Math.abs(a)>.36);
       if (padActivity) {
         lastPadActivity=true;
         if (activeInput !== 'gamepad') setInput('gamepad');
@@ -33985,23 +34117,26 @@ window.addEventListener("keydown", function(event) {
       if(menuOpen){
         for(const k of ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown']){
           if(desired.has(k)&&(!padHeld.has(k)||t-lastNav>190)){
-            window.dispatchEvent(new KeyboardEvent('keydown',{code:k,key:k,bubbles:true}));lastNav=t;
+            window.dispatchEvent(new KeyboardEvent('keydown',{code:k,key:k,bubbles:true}));
+            lastNav=t;
           }
         }
         if(btn(p,0))desired.add('Enter');
       }else{
         desired.delete('ArrowDown');
-        if(btn(p,0))desired.add('ArrowUp'); // A / Cross jump
-        if(btn(p,2)||p.buttons[7]?.value>.35)desired.add('Space'); // X / Square or RT fire
-        if(btn(p,1))desired.add('KeyR'); // B / Circle reload
-        if(btn(p,3)||btn(p,5))desired.add('ShiftLeft'); // Y / Triangle or RB dash
+        if(btn(p,0))desired.add('ArrowUp');
+        if(btn(p,2)||p.buttons[7]?.value>.35)desired.add('Space');
+        if(btn(p,1))desired.add('KeyR');
+        if(btn(p,3)||btn(p,5))desired.add('ShiftLeft');
       }
-      if(btn(p,9))desired.add('Escape'); // Start pause
+      if(btn(p,9))desired.add('Escape');
       for(const k of padHeld)if(!desired.has(k))window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
       for(const k of desired)if(!padHeld.has(k))window.dispatchEvent(new KeyboardEvent('keydown',{code:k,key:k,bubbles:true}));
       padHeld.clear();for(const k of desired)padHeld.add(k);
-      wasMenu=menuOpen;
-    }else if(padHeld.size){for(const k of padHeld)window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));padHeld.clear();}
+    }else if(padHeld.size){
+      for(const k of padHeld)window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
+      padHeld.clear();
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
