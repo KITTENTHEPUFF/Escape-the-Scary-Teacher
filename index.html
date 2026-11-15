@@ -2719,6 +2719,11 @@ body.hideGameplayHud #labHud {
 #game #mobileStick, #game #mobileStick *, #game .touchBtn { touch-action: none; }
 /* Fixed-position D-pad buttons: global button:hover formerly replaced their
    translateY(-50%) transform and made the left/right keys jump vertically. */
+/* Reliable gameplay touch feedback: stays lit while a finger owns the key. */
+#touch .touch-pressed { filter:brightness(1.24) saturate(1.18) !important; }
+#touch .dpadBtn.touch-pressed,
+#touch .dpadBtn.touch-pressed:active,
+#touch .dpadBtn.touch-pressed:hover { transform:translateY(-50%) !important; }
 #touch .dpadBtn,
 #touch .dpadBtn:hover,
 #touch .dpadBtn:active,
@@ -15492,54 +15497,9 @@ window.addEventListener("keyup", function(e) {
 
 });
 
-document.querySelectorAll(".touchBtn[data-key]").forEach(function(button) {
-
-  const key = button.dataset.key;
-
-  button.addEventListener("pointerdown", function(e) {
-    e.preventDefault();
-    setKey(key, true);
-  });
-
-  button.addEventListener("pointerup", function(e) {
-    e.preventDefault();
-    setKey(key, false);
-  });
-
-  button.addEventListener("pointercancel", function() {
-    setKey(key, false);
-  });
-
-  button.addEventListener("pointerleave", function() {
-    setKey(key, false);
-  });
-
-});
-
-const touchFireButton = document.getElementById("touchFire");
-const touchReloadButton = document.getElementById("touchReload");
-
-if (touchReloadButton) {
-  touchReloadButton.addEventListener("pointerdown", function(e) {
-    e.preventDefault();
-    beginSurvivalReload();
-  });
-}
-
-if (touchFireButton) {
-  touchFireButton.addEventListener("pointerdown", function(e) {
-    e.preventDefault();
-    survivalFireHeld = true;
-    fireSurvivalBlaster();
-  });
-
-  ["pointerup", "pointercancel", "pointerleave"].forEach(function(type) {
-    touchFireButton.addEventListener(type, function() {
-      releaseHeatwaveShot();
-      survivalFireHeld = false;
-      });
-  });
-}
+// Mobile touch controls are owned by the unified multi-touch handler below.
+// Do not register separate pointerup/pointerleave listeners here: iPad Safari
+// can send PointerCancel while a TouchEvent contact is still held.
 
 function updateSurvivalPointerAim(e) {
   const rect = canvas.getBoundingClientRect();
@@ -34085,18 +34045,22 @@ window.addEventListener("keydown", function(event) {
     }
   }
   window.__syncTwoPlayerOption = syncTwoPlayerOption;
+  const activeTouchControls = new Map(); // one action per physical finger/pointer
   const releaseTouchInputs = () => {
+    activeTouchControls.clear();
     setKey('left', false);
     setKey('right', false);
     setKey('jump', false);
     if (typeof releaseHeatwaveShot === 'function') releaseHeatwaveShot();
     if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = false;
+    for (const b of touch.querySelectorAll('.touch-pressed')) b.classList.remove('touch-pressed');
   };
   function setInput(type) {
     if (activeInput === type) return;
     activeInput = type;
     gameRoot.dataset.activeInput = type;
     if (type !== 'touch') releaseTouchInputs();
+    if (type !== 'gamepad') releaseGamepadInputs();
     syncTwoPlayerOption();
   }
   gameRoot.dataset.activeInput = activeInput;
@@ -34134,104 +34098,122 @@ window.addEventListener("keydown", function(event) {
     toggleTouchPause();
   });
 
-  const holdBindings = [
-    ['#touchLeft', () => setKey('left', true), () => setKey('left', false)],
-    ['#touchRight', () => setKey('right', true), () => setKey('right', false)],
-    ['#touchJump', () => setKey('jump', true), () => setKey('jump', false)],
-    ['#touchFire', () => {
-      if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = true;
-      if (typeof fireSurvivalBlaster === 'function') fireSurvivalBlaster();
-    }, () => {
-      if (typeof releaseHeatwaveShot === 'function') releaseHeatwaveShot();
-      if (typeof survivalFireHeld !== 'undefined') survivalFireHeld = false;
-    }]
-  ];
+  /*
+   * iOS / iPadOS reliable multi-touch controls.
+   * A finger is identified by Touch.identifier. PointerEvents from the same
+   * finger are NOT used for movement, because WebKit can emit pointercancel
+   * while the original touch continues. Releasing Jump cannot release Left.
+   */
+  const dpad = touch.querySelector('.dpadWrap');
+  const actionButtons = {
+    left:touch.querySelector('#touchLeft'),
+    right:touch.querySelector('#touchRight'),
+    jump:touch.querySelector('#touchJump'),
+    dash:touch.querySelector('#touchDash'),
+    fire:touch.querySelector('#touchFire'),
+    reload:touch.querySelector('#touchReload')
+  };
 
-  function bindHold(selector, onPress, onRelease) {
-    const el = touch.querySelector(selector);
-    if (!el) return;
-    let activePointer = null;
-    const press = e => {
-      if (e.cancelable) e.preventDefault();
-      e.stopImmediatePropagation();
-      setInput('touch');
-      if (activePointer !== null) return; // Pointer + touch events from one finger count once.
-      activePointer = 'pointerId' in e ? e.pointerId : 'touch';
-      try { if ('pointerId' in e && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch(_) {}
-      onPress();
-    };
-    const release = e => {
-      if (activePointer === null) return;
-      if ('pointerId' in e && e.pointerId !== activePointer) return;
-      if (e.cancelable) e.preventDefault();
-      e.stopImmediatePropagation();
-      activePointer = null;
-      onRelease();
-    };
-    el.addEventListener('pointerdown', press, true);
-    for (const evt of ['pointerup','pointercancel','lostpointercapture']) {
-      el.addEventListener(evt, release, true);
+  function actionAt(x,y,element) {
+    if (!element || !(element instanceof Element)) return null;
+    if (dpad && (element === dpad || dpad.contains(element))) {
+      const r=dpad.getBoundingClientRect();
+      return x < r.left + r.width / 2 ? 'left' : 'right';
     }
-    // Always bind touch as well: Safari can cancel PointerEvents on a held finger.
-    // The activePointer guard prevents duplicate press/release actions.
-    el.addEventListener('touchstart', press, {passive:false,capture:true});
-    for (const evt of ['touchend','touchcancel']) {
-      el.addEventListener(evt, release, {passive:false,capture:true});
+    const button=element.closest('#touchJump,#touchDash,#touchFire,#touchReload');
+    if (!button || !touch.contains(button)) return null;
+    return button.id==='touchJump'?'jump':
+           button.id==='touchDash'?'dash':
+           button.id==='touchFire'?'fire':'reload';
+  }
+  function syncHeldButtons() {
+    // Most recent held direction takes priority if two fingers hold both sides.
+    let horizontal=null, jump=false, fire=false;
+    for(const action of activeTouchControls.values()) {
+      if(action==='left'||action==='right') horizontal=action;
+      if(action==='jump') jump=true;
+      if(action==='fire') fire=true;
     }
-  }
-
-  for (const [selector, onPress, onRelease] of holdBindings) bindHold(selector, onPress, onRelease);
-  // Safari/WebKit may show a native "Look Up"/Inspect callout even with CSS
-  // user-select:none. Cancel the native long-press gesture at touchstart.
-  // These are gameplay controls only; normal scrolling in menus is untouched.
-  const stopNativeTouchGesture = e => { if (e.cancelable) e.preventDefault(); };
-  for (const evt of ['touchstart','touchmove']) {
-    touch.addEventListener(evt, stopNativeTouchGesture, {capture:true,passive:false});
-  }
-  for (const evt of ['contextmenu','selectstart','dragstart','gesturestart']) {
-    touch.addEventListener(evt, e => {
-      if (e.cancelable) e.preventDefault();
-      e.stopPropagation();
-    }, true);
-  }
-
-
-  const touchReload = touch.querySelector('#touchReload');
-  if (touchReload) {
-    let reloadDown = false;
-    const reloadNow = e => {
-      if (e.cancelable) e.preventDefault();
-      e.stopImmediatePropagation();
-      if (reloadDown) return;
-      reloadDown = true;
-      setInput('touch');
-      if (typeof beginSurvivalReload === 'function') beginSurvivalReload();
-    };
-    const reloadUp = () => { reloadDown = false; };
-    touchReload.addEventListener('pointerdown', reloadNow, true);
-    touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
-    for (const evt of ['pointerup','pointercancel','lostpointercapture','touchend','touchcancel']) {
-      touchReload.addEventListener(evt, reloadUp, true);
+    setKey('left',horizontal==='left');
+    setKey('right',horizontal==='right');
+    setKey('jump',jump);
+    if (typeof survivalFireHeld!=='undefined') {
+      if (survivalFireHeld && !fire && typeof releaseHeatwaveShot==='function') releaseHeatwaveShot();
+      survivalFireHeld=fire;
+    }
+    for(const [action,button] of Object.entries(actionButtons)) {
+      if (!button) continue;
+      const pressed=[...activeTouchControls.values()].includes(action);
+      button.classList.toggle('touch-pressed',pressed);
+      button.setAttribute('aria-pressed',String(pressed));
     }
   }
-
-  const touchDash = touch.querySelector('#touchDash');
-  if (touchDash) {
-    let dashDown = false;
-    const dashNow = e => {
-      if (e.cancelable) e.preventDefault();
-      e.stopImmediatePropagation();
-      if (dashDown) return;
-      dashDown = true;
-      setInput('touch');
-      if (typeof dashRequested !== 'undefined') dashRequested = true;
-    };
-    const dashUp = () => { dashDown = false; };
-    touchDash.addEventListener('pointerdown', dashNow, true);
-    touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
-    for (const evt of ['pointerup','pointercancel','lostpointercapture','touchend','touchcancel']) {
-      touchDash.addEventListener(evt, dashUp, true);
+  function controlDown(id,action) {
+    if (!action || activeTouchControls.has(id)) return;
+    // When game is paused or hidden, don't activate gameplay buttons.
+    if (!gameRoot.classList.contains('touch-gameplay-active')) return;
+    setInput('touch');
+    activeTouchControls.set(id,action);
+    syncHeldButtons();
+    if (action==='dash') {
+      if (typeof dashRequested!=='undefined') dashRequested=true;
+    } else if (action==='reload') {
+      if (typeof beginSurvivalReload==='function') beginSurvivalReload();
+    } else if (action==='fire') {
+      if (typeof fireSurvivalBlaster==='function') fireSurvivalBlaster();
     }
+  }
+  function controlUp(id) {
+    if (!activeTouchControls.has(id)) return;
+    activeTouchControls.delete(id);
+    syncHeldButtons();
+  }
+
+  // Cancel iOS long-press gestures only inside the gameplay controls.
+  // Identifiers keep every finger separate even during multi-touch actions.
+  touch.addEventListener('touchstart',e=>{
+    let matched=false;
+    for(const t of e.changedTouches) {
+      const action=actionAt(t.clientX,t.clientY,e.target);
+      if(action){controlDown('t'+t.identifier,action);matched=true;}
+    }
+    if(matched && e.cancelable)e.preventDefault();
+  },{capture:true,passive:false});
+  document.addEventListener('touchmove',e=>{
+    if([...e.touches].some(t=>activeTouchControls.has('t'+t.identifier)) && e.cancelable) e.preventDefault();
+    // A held movement button stays active even if the finger shifts slightly;
+    // no touchmove can accidentally release or switch directions.
+  },{capture:true,passive:false});
+  function onTouchFinish(e) {
+    let matched=false;
+    for(const t of e.changedTouches) {
+      const id='t'+t.identifier;
+      if(activeTouchControls.has(id)) {controlUp(id);matched=true;}
+    }
+    if(matched && e.cancelable)e.preventDefault();
+  }
+  document.addEventListener('touchend',onTouchFinish,{capture:true,passive:false});
+  document.addEventListener('touchcancel',onTouchFinish,{capture:true,passive:false});
+
+  // Mouse / stylus fallback (touch is handled exclusively by TouchEvents).
+  touch.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='touch') return;
+    const action=actionAt(e.clientX,e.clientY,e.target);
+    if(!action)return;
+    if(e.cancelable)e.preventDefault();
+    controlDown('p'+e.pointerId,action);
+    try{e.target.setPointerCapture?.(e.pointerId);}catch(_){}
+  },true);
+  function onPointerFinish(e) {
+    if(e.pointerType==='touch')return;
+    controlUp('p'+e.pointerId);
+  }
+  document.addEventListener('pointerup',onPointerFinish,true);
+  document.addEventListener('pointercancel',onPointerFinish,true);
+  touch.addEventListener('lostpointercapture',onPointerFinish,true);
+
+  for(const evt of ['contextmenu','selectstart','dragstart','gesturestart']) {
+    touch.addEventListener(evt,e=>{if(e.cancelable)e.preventDefault();},true);
   }
 
   window.addEventListener('blur', releaseTouchInputs);
@@ -34256,55 +34238,188 @@ window.addEventListener("keydown", function(event) {
   }
   syncTwoPlayerOption();
   refreshTouchVisibility();
-  const padHeld=new Set();
-  let lastNav=0;
-  const btn=(p,i)=>!!p.buttons[i]?.pressed;
-  function frame(t){
-    refreshTouchVisibility();
-    const p=navigator.getGamepads?.().find(Boolean);
-    if(p){
-      const padActivity = p.buttons.some(b=>b.pressed || b.value>.35) || p.axes.some(a=>Math.abs(a)>.36);
-      if (padActivity) {
-        lastPadActivity=true;
-        if (activeInput !== 'gamepad') setInput('gamepad');
-      } else lastPadActivity=false;
-      // Controllers must not control either player in keyboard-only 2-player games.
-      if (typeof running !== 'undefined' && running &&
-          typeof multiplayerActive === 'function' && multiplayerActive()) {
-        for (const k of padHeld) window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
-        padHeld.clear();
-        requestAnimationFrame(frame);
-        return;
+  /*
+   * Browser-compatible controller support.
+   * Safari exposes Gamepad / GamepadButtonList as array-like objects on some
+   * versions, so never call .find() or .some() on the native lists directly.
+   * Gameplay writes the SAME input state that the keyboard / touch code reads.
+   */
+  const gamepadHeld={left:false,right:false,jump:false,fire:false};
+  let padControlsActive=false;
+  let previousPadActions=new Set();
+  let navigationRepeatAt=0;
+  let navigationDirection='';
+  let detectedPadId='';
+  const gamepadStatus=document.createElement('div');
+  gamepadStatus.id='gamepadStatus';
+  gamepadStatus.style.cssText='display:none;margin-top:10px;color:#78efb6;font:bold 12px/1.6 monospace;';
+  const controlsNote=document.querySelector('#menu .controls');
+  if(controlsNote)controlsNote.appendChild(gamepadStatus);
+  function setPadStatus(message){
+    if(!controlsNote)return;
+    const txt=message?'CONTROLLER: '+message:'';
+    if(gamepadStatus.textContent!==txt){gamepadStatus.textContent=txt;gamepadStatus.style.display=txt?'block':'none';}
+  }
+  function releaseGamepadInputs(){
+    if(!padControlsActive) return;
+    padControlsActive=false;
+    for(const key of ['left','right','jump'])setKey(key,false);
+    if(gamepadHeld.fire&&typeof releaseHeatwaveShot==='function')releaseHeatwaveShot();
+    if(typeof survivalFireHeld!=='undefined')survivalFireHeld=false;
+    for(const key of Object.keys(gamepadHeld))gamepadHeld[key]=false;
+  }
+  function getConnectedGamepad(){
+    if(typeof navigator.getGamepads!=='function')return null;
+    try {
+      // Array.from also works for older Safari's non-Array GamepadList.
+      const available=Array.from(navigator.getGamepads()||[]);
+      return available.find(p=>p&&p.connected!==false)||null;
+    }catch(err){return null;}
+  }
+  function buttonDown(buttons,index){
+    const b=buttons[index];
+    return !!b&&(b.pressed===true||Number(b.value||0)>.48||b===1);
+  }
+  function syntheticEscape(){
+    window.dispatchEvent(new KeyboardEvent('keydown',{
+      code:'Escape',key:'Escape',bubbles:true,cancelable:true
+    }));
+  }
+  function handleGamepadBack(){
+    if(typeof running!=='undefined'&&running){
+      // Let the existing Escape listener close pause settings or the pause menu.
+      if(typeof runPaused!=='undefined'&&runPaused)syntheticEscape();
+      else if(typeof openRunPause==='function')openRunPause();
+    }else syntheticEscape(); // Close the main menu's topmost popup.
+  }
+  function navigateController(direction,now){
+    if(!direction){navigationDirection='';navigationRepeatAt=0;return;}
+    if(direction!==navigationDirection||now>=navigationRepeatAt){
+      // Bypass KeyboardEvent synthesis: call the existing universal menu API.
+      window.__gameMenuNavigation?.navigate?.(direction);
+      const newlyPressed=direction!==navigationDirection;
+      navigationDirection=direction;
+      navigationRepeatAt=now+(newlyPressed?330:175);
+    }
+  }
+  function updateGamepadGameplay(actions){
+    const left=actions.has('left');
+    const right=actions.has('right');
+    const jump=actions.has('jump');
+    const fire=actions.has('fire');
+    padControlsActive=true;
+    setKey('left',left);
+    setKey('right',right);
+    setKey('jump',jump);
+    if(typeof survivalFireHeld!=='undefined'){
+      if(gamepadHeld.fire&&!fire&&typeof releaseHeatwaveShot==='function')releaseHeatwaveShot();
+      survivalFireHeld=fire;
+    }
+    if(fire&&!gamepadHeld.fire && typeof fireSurvivalBlaster==='function')fireSurvivalBlaster();
+    if(actions.has('reload')&&!previousPadActions.has('reload') && typeof beginSurvivalReload==='function')beginSurvivalReload();
+    if(actions.has('dash')&&!previousPadActions.has('dash') && typeof dashRequested!=='undefined')dashRequested=true;
+    gamepadHeld.left=left;
+    gamepadHeld.right=right;
+    gamepadHeld.jump=jump;
+    gamepadHeld.fire=fire;
+  }
+  window.addEventListener('gamepadconnected',()=>{
+    const pad=getConnectedGamepad();
+    if(pad)setPadStatus('connected · press A / Cross to select');
+  });
+  window.addEventListener('gamepaddisconnected',()=>{
+    releaseGamepadInputs();
+    previousPadActions.clear();
+    navigationDirection='';
+    detectedPadId='';
+    if(activeInput==='gamepad')setInput(coarse?'touch':'keyboard');
+    setPadStatus('');
+  });
+  function gamepadFrame(now){
+    const p=getConnectedGamepad();
+    if(!p){
+      if(detectedPadId){detectedPadId='';setPadStatus('');}
+      if(activeInput==='gamepad')setInput(coarse?'touch':'keyboard');
+      releaseGamepadInputs();
+      previousPadActions.clear();
+      navigationDirection='';
+      return;
+    }
+    if(detectedPadId!==String(p.id||'controller')){
+      detectedPadId=String(p.id||'controller');
+      setPadStatus('connected · D-pad / stick to move · A / Cross to select');
+    }
+    const buttons=Array.from(p.buttons||[]);
+    const axes=Array.from(p.axes||[]);
+    const x=Number(axes[0]||0),y=Number(axes[1]||0);
+    const left=x<-.30||buttonDown(buttons,14);
+    const right=x>.30||buttonDown(buttons,15);
+    const up=y<-.33||buttonDown(buttons,12);
+    const down=y>.33||buttonDown(buttons,13);
+    const confirm=buttonDown(buttons,0);
+    const back=buttonDown(buttons,1);
+    const fire=buttonDown(buttons,2)||buttonDown(buttons,7);
+    const reload=back||buttonDown(buttons,4);
+    const dash=buttonDown(buttons,3)||buttonDown(buttons,5);
+    const start=buttonDown(buttons,9);
+    const hasActivity=left||right||up||down||buttons.some(b=>b&&
+      (b.pressed===true||Number(b.value||0)>.48))||axes.some(v=>Math.abs(Number(v)||0)>.42);
+    if(hasActivity && activeInput!=='gamepad')setInput('gamepad');
+    if(activeInput!=='gamepad')return;
+
+    // Controller usage is deliberately single-player only.
+    if(typeof running!=='undefined'&&running&&typeof multiplayerActive==='function'&&multiplayerActive()){
+      releaseGamepadInputs();
+      previousPadActions.clear();
+      return;
+    }
+    const pauseOpen=typeof runPaused!=='undefined'&&runPaused;
+    const choosingWeapon=typeof pendingWeaponChestChoice!=='undefined'&&!!pendingWeaponChestChoice;
+    const tutorialOpen=typeof tutorial!=='undefined'&&!!tutorial.active;
+    const settingsOpen=!!document.querySelector('#settingsPanel.show');
+    const modalOpen=!!document.querySelector('.screen:not(.hidden),#runPauseMenu.show,#settingsPanel.show,[aria-modal="true"].show');
+    const gameplay=typeof running!=='undefined'&&running&&
+      !pauseOpen&&!choosingWeapon&&!tutorialOpen&&!settingsOpen&&!modalOpen;
+    const actions=new Set();
+    if(left)actions.add('left');
+    if(right)actions.add('right');
+    if(up)actions.add('up');
+    if(down)actions.add('down');
+    if(confirm)actions.add('confirm');
+    if(back)actions.add('back');
+    if(fire)actions.add('fire');
+    if(reload)actions.add('reload');
+    if(dash)actions.add('dash');
+    if(start)actions.add('start');
+
+    if(gameplay){
+      const movement=new Set();
+      if(left)movement.add('left');
+      if(right)movement.add('right');
+      if(up||confirm)movement.add('jump');
+      if(fire)movement.add('fire');
+      if(reload)movement.add('reload');
+      if(dash)movement.add('dash');
+      updateGamepadGameplay(movement);
+    }else{
+      releaseGamepadInputs();
+      const dir=up?'up':down?'down':left?'left':right?'right':'';
+      navigateController(dir,now);
+      if(confirm&&!previousPadActions.has('confirm')){
+        if(choosingWeapon && pendingWeaponChestChoice?.awaitingContinue){
+          if(typeof continueWeaponChestReveal==='function')continueWeaponChestReveal();
+        }else window.__gameMenuNavigation?.activate?.();
       }
-      const menuOpen=typeof running==='undefined'||!running || (typeof gamePaused!=='undefined'&&gamePaused) || !!document.querySelector('#pauseMenu.show, #settingsPanel.show, .screen:not(.hidden)');
-      const desired=new Set();
-      const x=p.axes[0]||0,y=p.axes[1]||0;
-      if(x<-.28||btn(p,14))desired.add('ArrowLeft');
-      if(x>.28||btn(p,15))desired.add('ArrowRight');
-      if(y<-.35||btn(p,12))desired.add('ArrowUp');
-      if(y>.35||btn(p,13))desired.add('ArrowDown');
-      if(menuOpen){
-        for(const k of ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown']){
-          if(desired.has(k)&&(!padHeld.has(k)||t-lastNav>190)){
-            window.dispatchEvent(new KeyboardEvent('keydown',{code:k,key:k,bubbles:true}));
-            lastNav=t;
-          }
-        }
-        if(btn(p,0))desired.add('Enter');
-      }else{
-        desired.delete('ArrowDown');
-        if(btn(p,0))desired.add('ArrowUp');
-        if(btn(p,2)||p.buttons[7]?.value>.35)desired.add('Space');
-        if(btn(p,1))desired.add('KeyR');
-        if(btn(p,3)||btn(p,5))desired.add('ShiftLeft');
-      }
-      if(btn(p,9))desired.add('Escape');
-      for(const k of padHeld)if(!desired.has(k))window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
-      for(const k of desired)if(!padHeld.has(k))window.dispatchEvent(new KeyboardEvent('keydown',{code:k,key:k,bubbles:true}));
-      padHeld.clear();for(const k of desired)padHeld.add(k);
-    }else if(padHeld.size){
-      for(const k of padHeld)window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
-      padHeld.clear();
+      if(back&&!previousPadActions.has('back'))handleGamepadBack();
+    }
+    if(start&&!previousPadActions.has('start'))handleGamepadBack();
+    previousPadActions=actions;
+  }
+  function frame(now){
+    try{refreshTouchVisibility();gamepadFrame(now);}
+    catch(error){
+      // Keep polling even if a browser returns temporarily malformed gamepad data.
+      if(!frame.lastError||now-frame.lastError>4000){console.warn('Controller input:',error);frame.lastError=now;}
     }
     requestAnimationFrame(frame);
   }
