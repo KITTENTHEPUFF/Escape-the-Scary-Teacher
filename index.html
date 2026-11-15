@@ -2717,6 +2717,50 @@ body.hideGameplayHud #labHud {
   touch-action: manipulation;
 }
 #game #mobileStick, #game #mobileStick *, #game .touchBtn { touch-action: none; }
+/* Fixed-position D-pad buttons: global button:hover formerly replaced their
+   translateY(-50%) transform and made the left/right keys jump vertically. */
+#touch .dpadBtn,
+#touch .dpadBtn:hover,
+#touch .dpadBtn:active,
+#touch .dpadBtn:focus-visible {
+  transform: translateY(-50%) !important;
+  transition: filter .12s ease, background-color .12s ease !important;
+}
+#touch .actionBtn:hover,
+#touch .actionBtn:active,
+#touch #touchPause:hover,
+#touch #touchPause:active { transform:none !important; }
+#touch .dpadWrap, #touch .dpadBtn,
+#touch .actionBtn, #touch #touchPause {
+  touch-action:none !important;
+  -webkit-user-drag:none;
+  -webkit-touch-callout:none;
+  user-select:none;
+  -webkit-user-select:none;
+  overscroll-behavior:none;
+}
+/* Touch buttons are hidden on ALL menu / setup / pause / game-over screens.
+   Only JS may enable them during actual single-player touchscreen gameplay. */
+#game:not(.touch-gameplay-active) #touch,
+#game[data-active-input="touch"]:not(.touch-gameplay-active) #touch { display:none !important; }
+#game[data-active-input="touch"].touch-gameplay-active #touch { display:flex !important; }
+/* Classic and Survival: movement, jump, dash. In Survival, aiming and
+   firing are still possible by touching/holding the game world itself. */
+#game #touchFire,
+#game #touchReload { display:none !important; }
+/* Boss fights / weapon lab require dedicated weapon controls. */
+#game[data-touch-mode="boss"] #touchFire,
+#game[data-touch-mode="boss"] #touchReload,
+#game[data-touch-mode="lab"] #touchFire,
+#game[data-touch-mode="lab"] #touchReload { display:flex !important; }
+/* Keep 2-player choice clearly unavailable on touch or gamepad. */
+#gameSetup [data-player-count="2"]:disabled {
+  opacity:.48 !important;
+  cursor:not-allowed !important;
+  filter:grayscale(.65);
+  box-shadow: none !important;
+  transform:none !important;
+}
 /* Do not disable scrolling or text editing in menus. */
 </style>
 <style id="labSandboxStyle">
@@ -25907,6 +25951,11 @@ function startSurvivalGame() {
 }
 
 function startGame() {
+  if (setupPlayerCount === 2 && window.__twoPlayerInputBlocked?.()) {
+    setupPlayerCount = 1;
+    showGameSetupStep('players');
+    return;
+  }
   closeRunPause(false);
   if (typeof tutorialMustFinishAll === 'function' && tutorialMustFinishAll()) {
     if (!tutorial.active) showControlsTutorial(true);
@@ -31917,6 +31966,7 @@ function applyDuelAlterSettings() {
 }
 function showGameSetupStep(step) {
   setupStep = step;
+  if (step === 'players') window.__syncTwoPlayerOption?.();
   gameSetup.classList.remove("hidden");
   menu.classList.add("hidden");
   for (const name of setupSteps) {
@@ -31999,6 +32049,10 @@ document.getElementById("start").onclick = function() {
 document.querySelectorAll("[data-player-count]").forEach(function(button) {
   button.onclick = function() {
     playButtonSound();
+    if (button.dataset.playerCount === '2' && window.__twoPlayerInputBlocked?.()) {
+      window.__syncTwoPlayerOption?.();
+      return;
+    }
     setupPlayerCount = Number(button.dataset.playerCount);
     showGameSetupStep("mode");
   };
@@ -32078,6 +32132,11 @@ document.getElementById('setupBossStart').onclick = function() {
 };
 
 document.getElementById("setupPlay").onclick = function() {
+  if (setupPlayerCount === 2 && window.__twoPlayerInputBlocked?.()) {
+    setupPlayerCount = 1;
+    showGameSetupStep('players');
+    return;
+  }
   playButtonSound();
   gameSetup.classList.add("hidden");
   if (setupMode === "boss") {currentGameMode="boss";startGame();}
@@ -33993,6 +34052,25 @@ window.addEventListener("keydown", function(event) {
   const coarse = window.matchMedia?.('(pointer:coarse)').matches || navigator.maxTouchPoints > 0;
   let activeInput = coarse ? 'touch' : 'keyboard';
   let lastPadActivity = false;
+  const playerTwoButton = document.querySelector('[data-player-count="2"]');
+  const playerTwoInfo = playerTwoButton?.querySelector('small');
+  const playerTwoOriginalLabel = playerTwoInfo?.textContent || '';
+  window.__twoPlayerInputBlocked = () => coarse || activeInput === 'gamepad';
+  function syncTwoPlayerOption() {
+    if (!playerTwoButton) return;
+    const blocked = window.__twoPlayerInputBlocked();
+    playerTwoButton.disabled = blocked;
+    playerTwoButton.title = blocked ? '2-player mode requires a PC keyboard. It is unavailable on touchscreens or controllers.' : '';
+    if (playerTwoInfo) playerTwoInfo.textContent = blocked ? 'Keyboard only · not supported on mobile or controller' : playerTwoOriginalLabel;
+    // Never change player count during a running keyboard multiplayer match.
+    if (blocked && typeof setupPlayerCount !== 'undefined' && setupPlayerCount === 2 &&
+        typeof running !== 'undefined' && !running &&
+        !document.getElementById('gameSetup').classList.contains('hidden')) {
+      setupPlayerCount = 1;
+      if (typeof showGameSetupStep === 'function') showGameSetupStep('players');
+    }
+  }
+  window.__syncTwoPlayerOption = syncTwoPlayerOption;
   const releaseTouchInputs = () => {
     setKey('left', false);
     setKey('right', false);
@@ -34005,6 +34083,7 @@ window.addEventListener("keydown", function(event) {
     activeInput = type;
     gameRoot.dataset.activeInput = type;
     if (type !== 'touch') releaseTouchInputs();
+    syncTwoPlayerOption();
   }
   gameRoot.dataset.activeInput = activeInput;
 
@@ -34059,12 +34138,14 @@ window.addEventListener("keydown", function(event) {
       onRelease();
     };
     el.addEventListener('pointerdown', press, true);
-    for (const evt of ['pointerup','pointercancel','lostpointercapture','pointerleave']) {
+    for (const evt of ['pointerup','pointercancel','lostpointercapture']) {
       el.addEventListener(evt, release, true);
     }
-    el.addEventListener('touchstart', press, {passive:false,capture:true});
-    for (const evt of ['touchend','touchcancel']) {
-      el.addEventListener(evt, release, {passive:false,capture:true});
+    if (!window.PointerEvent) { // Fallback for older touch-only browsers.
+      el.addEventListener('touchstart', press, {passive:false,capture:true});
+      for (const evt of ['touchend','touchcancel']) {
+        el.addEventListener(evt, release, {passive:false,capture:true});
+      }
     }
   }
 
@@ -34079,7 +34160,7 @@ window.addEventListener("keydown", function(event) {
       if (typeof beginSurvivalReload === 'function') beginSurvivalReload();
     };
     touchReload.addEventListener('pointerdown', reloadNow, true);
-    touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
+    if (!window.PointerEvent) touchReload.addEventListener('touchstart', reloadNow, {passive:false,capture:true});
   }
 
   const touchDash = touch.querySelector('#touchDash');
@@ -34091,15 +34172,36 @@ window.addEventListener("keydown", function(event) {
       if (typeof dashRequested !== 'undefined') dashRequested = true;
     };
     touchDash.addEventListener('pointerdown', dashNow, true);
-    touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
+    if (!window.PointerEvent) touchDash.addEventListener('touchstart', dashNow, {passive:false,capture:true});
   }
 
   window.addEventListener('blur', releaseTouchInputs);
 
+  const gameOverPanel = document.getElementById('gameOver');
+  const gameMenu = document.getElementById('menu');
+  const gameSetupPanel = document.getElementById('gameSetup');
+  function refreshTouchVisibility() {
+    const mode = typeof expansionMode !== 'undefined' && expansionMode === 'lab' ? 'lab' :
+                 typeof currentGameMode !== 'undefined' ? currentGameMode : 'classic';
+    gameRoot.dataset.touchMode = mode;
+    const actuallyPlaying = typeof running !== 'undefined' && running &&
+      !(typeof runPaused !== 'undefined' && runPaused) &&
+      !(typeof pendingWeaponChestChoice !== 'undefined' && pendingWeaponChestChoice) &&
+      !(typeof tutorial !== 'undefined' && tutorial.active) &&
+      !(typeof setupPlayerCount !== 'undefined' && setupPlayerCount === 2) &&
+      (!gameMenu || gameMenu.classList.contains('hidden')) &&
+      (!gameSetupPanel || gameSetupPanel.classList.contains('hidden')) &&
+      (!gameOverPanel || gameOverPanel.classList.contains('hidden'));
+    gameRoot.classList.toggle('touch-gameplay-active', actuallyPlaying && activeInput === 'touch');
+    if (!actuallyPlaying) releaseTouchInputs();
+  }
+  syncTwoPlayerOption();
+  refreshTouchVisibility();
   const padHeld=new Set();
   let lastNav=0;
   const btn=(p,i)=>!!p.buttons[i]?.pressed;
   function frame(t){
+    refreshTouchVisibility();
     const p=navigator.getGamepads?.().find(Boolean);
     if(p){
       const padActivity = p.buttons.some(b=>b.pressed || b.value>.35) || p.axes.some(a=>Math.abs(a)>.36);
@@ -34107,6 +34209,14 @@ window.addEventListener("keydown", function(event) {
         lastPadActivity=true;
         if (activeInput !== 'gamepad') setInput('gamepad');
       } else lastPadActivity=false;
+      // Controllers must not control either player in keyboard-only 2-player games.
+      if (typeof running !== 'undefined' && running &&
+          typeof multiplayerActive === 'function' && multiplayerActive()) {
+        for (const k of padHeld) window.dispatchEvent(new KeyboardEvent('keyup',{code:k,key:k,bubbles:true}));
+        padHeld.clear();
+        requestAnimationFrame(frame);
+        return;
+      }
       const menuOpen=typeof running==='undefined'||!running || (typeof gamePaused!=='undefined'&&gamePaused) || !!document.querySelector('#pauseMenu.show, #settingsPanel.show, .screen:not(.hidden)');
       const desired=new Set();
       const x=p.axes[0]||0,y=p.axes[1]||0;
